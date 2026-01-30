@@ -1,33 +1,66 @@
 const express = require('express');
 const session = require('express-session');
+const pgSession = require('connect-pg-simple')(session);
 const bcrypt = require('bcryptjs');
-const fs = require('fs');
+const { Pool } = require('pg');
 const path = require('path');
 
 const app = express();
-const DB_PATH = path.join(__dirname, 'users.json');
 
-// Simple JSON database
-function getUsers() {
-  if (!fs.existsSync(DB_PATH)) {
-    fs.writeFileSync(DB_PATH, '[]');
+// PostgreSQL connection
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+});
+
+// Initialize database tables
+async function initDB() {
+  const client = await pool.connect();
+  try {
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        email VARCHAR(255) UNIQUE NOT NULL,
+        username VARCHAR(100) UNIQUE NOT NULL,
+        password VARCHAR(255) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS session (
+        sid VARCHAR NOT NULL COLLATE "default",
+        sess JSON NOT NULL,
+        expire TIMESTAMP(6) NOT NULL,
+        PRIMARY KEY (sid)
+      )
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS IDX_session_expire ON session (expire)
+    `);
+    console.log('✅ Database tables initialized');
+  } finally {
+    client.release();
   }
-  return JSON.parse(fs.readFileSync(DB_PATH, 'utf8'));
-}
-
-function saveUsers(users) {
-  fs.writeFileSync(DB_PATH, JSON.stringify(users, null, 2));
 }
 
 // Middleware
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
+
+// Session with PostgreSQL store
 app.use(session({
-  secret: 'your-secret-key-change-in-production',
+  store: new pgSession({
+    pool: pool,
+    tableName: 'session'
+  }),
+  secret: process.env.SESSION_SECRET || 'change-this-in-production',
   resave: false,
   saveUninitialized: false,
-  cookie: { secure: false, maxAge: 24 * 60 * 60 * 1000 }
+  cookie: { 
+    secure: process.env.NODE_ENV === 'production',
+    maxAge: 24 * 60 * 60 * 1000 // 24 hours
+  }
 }));
 
 // Routes
@@ -73,28 +106,23 @@ app.post('/register', async (req, res) => {
   }
 
   try {
-    const users = getUsers();
-    
-    if (users.find(u => u.email === email)) {
-      return res.status(400).json({ error: 'Email already exists' });
-    }
-    if (users.find(u => u.username === username)) {
-      return res.status(400).json({ error: 'Username already exists' });
-    }
-    
     const hashedPassword = await bcrypt.hash(password, 10);
-    users.push({
-      id: Date.now(),
-      email,
-      username,
-      password: hashedPassword,
-      createdAt: new Date().toISOString()
-    });
-    saveUsers(users);
-    
+    const result = await pool.query(
+      'INSERT INTO users (email, username, password) VALUES ($1, $2, $3) RETURNING id, email, username',
+      [email, username, hashedPassword]
+    );
     res.json({ success: true, message: 'Account created successfully!' });
   } catch (err) {
-    res.status(500).json({ error: 'Server error' });
+    if (err.code === '23505') { // Unique violation
+      if (err.constraint?.includes('email')) {
+        res.status(400).json({ error: 'Email already exists' });
+      } else {
+        res.status(400).json({ error: 'Username already exists' });
+      }
+    } else {
+      console.error('Registration error:', err);
+      res.status(500).json({ error: 'Server error' });
+    }
   }
 });
 
@@ -106,9 +134,12 @@ app.post('/login', async (req, res) => {
   }
 
   try {
-    const users = getUsers();
-    const user = users.find(u => u.username === username || u.email === username);
+    const result = await pool.query(
+      'SELECT * FROM users WHERE username = $1 OR email = $1',
+      [username]
+    );
     
+    const user = result.rows[0];
     if (!user) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
@@ -121,6 +152,7 @@ app.post('/login', async (req, res) => {
     req.session.user = { id: user.id, username: user.username, email: user.email };
     res.json({ success: true });
   } catch (err) {
+    console.error('Login error:', err);
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -130,7 +162,14 @@ app.post('/logout', (req, res) => {
   res.json({ success: true });
 });
 
+// Start server after DB init
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`🚀 Server running at http://localhost:${PORT}`);
+
+initDB().then(() => {
+  app.listen(PORT, () => {
+    console.log(`🚀 Server running at http://localhost:${PORT}`);
+  });
+}).catch(err => {
+  console.error('Failed to initialize database:', err);
+  process.exit(1);
 });

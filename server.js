@@ -66,6 +66,9 @@ async function initDB() {
   }
 }
 
+// Trust proxy (needed for secure cookies behind Render's proxy)
+app.set('trust proxy', 1);
+
 // Middleware
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());

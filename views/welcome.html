@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Welcome - AuthWeb</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="container">
+    <div class="card welcome-card">
+      <div class="avatar" id="avatar">?</div>
+      <h1>Welcome, <span id="username">User</span>! 🎉</h1>
+      <p class="subtitle" id="email">Loading...</p>
+      
+      <div class="welcome-content">
+        <p>You have successfully logged into your account.</p>
+        <div class="stats">
+          <div class="stat">
+            <span class="stat-icon">📧</span>
+            <span class="stat-label">Email Verified</span>
+          </div>
+          <div class="stat">
+            <span class="stat-icon">🔒</span>
+            <span class="stat-label">Account Secure</span>
+          </div>
+          <div class="stat">
+            <span class="stat-icon">✅</span>
+            <span class="stat-label">Session Active</span>
+          </div>
+        </div>
+      </div>
+      
+      <button id="logoutBtn" class="btn btn-outline">Sign Out</button>
+    </div>
+  </div>
+  
+  <script>
+    async function loadUser() {
+      try {
+        const res = await fetch('/api/user');
+        if (!res.ok) {
+          window.location.href = '/login';
+          return;
+        }
+        const user = await res.json();
+        document.getElementById('username').textContent = user.username;
+        document.getElementById('email').textContent = user.email;
+        document.getElementById('avatar').textContent = user.username.charAt(0).toUpperCase();
+      } catch (err) {
+        window.location.href = '/login';
+      }
+    }
+    
+    document.getElementById('logoutBtn').addEventListener('click', async () => {
+      await fetch('/logout', { method: 'POST' });
+      window.location.href = '/login';
+    });
+    
+    loadUser();
+  </script>
+</body>
+</html>

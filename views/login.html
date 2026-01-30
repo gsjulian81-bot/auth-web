@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Login - AuthWeb</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="container">
+    <div class="card">
+      <div class="logo">🔐</div>
+      <h1>Welcome Back</h1>
+      <p class="subtitle">Sign in to your account</p>
+      
+      <form id="loginForm">
+        <div class="form-group">
+          <label for="username">Username or Email</label>
+          <input type="text" id="username" name="username" required placeholder="Enter username or email">
+        </div>
+        
+        <div class="form-group">
+          <label for="password">Password</label>
+          <input type="password" id="password" name="password" required placeholder="Enter password">
+        </div>
+        
+        <div id="error" class="error"></div>
+        
+        <button type="submit" class="btn">Sign In</button>
+      </form>
+      
+      <p class="footer-text">
+        Don't have an account? <a href="/register">Create one</a>
+      </p>
+    </div>
+  </div>
+  
+  <script>
+    document.getElementById('loginForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const errorEl = document.getElementById('error');
+      errorEl.textContent = '';
+      
+      const formData = {
+        username: document.getElementById('username').value,
+        password: document.getElementById('password').value
+      };
+      
+      try {
+        const res = await fetch('/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(formData)
+        });
+        
+        const data = await res.json();
+        
+        if (data.success) {
+          window.location.href = '/welcome';
+        } else {
+          errorEl.textContent = data.error;
+        }
+      } catch (err) {
+        errorEl.textContent = 'An error occurred. Please try again.';
+      }
+    });
+  </script>
+</body>
+</html>

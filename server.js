@@ -15,16 +15,28 @@ const pool = new Pool({
   ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
 });
 
-// Email transporter
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || 'smtp.gmail.com',
-  port: process.env.SMTP_PORT || 587,
-  secure: false,
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS
-  }
-});
+// Email transporter (only create if SMTP is configured)
+let transporter = null;
+if (process.env.SMTP_USER && process.env.SMTP_PASS) {
+  transporter = nodemailer.createTransport({
+    host: process.env.SMTP_HOST || 'smtp.gmail.com',
+    port: parseInt(process.env.SMTP_PORT) || 587,
+    secure: false,
+    auth: {
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS
+    }
+  });
+  
+  // Verify connection on startup
+  transporter.verify((error, success) => {
+    if (error) {
+      console.error('❌ SMTP connection failed:', error.message);
+    } else {
+      console.log('✅ SMTP server ready to send emails');
+    }
+  });
+}
 
 // Initialize database tables
 async function initDB() {
@@ -225,19 +237,26 @@ app.post('/forgot-password', async (req, res) => {
     const resetUrl = `${baseUrl}/reset-password?token=${token}`;
     
     // Send email
-    if (process.env.SMTP_USER) {
-      await transporter.sendMail({
-        from: process.env.SMTP_FROM || process.env.SMTP_USER,
-        to: email,
-        subject: 'Password Reset Request',
-        html: `
-          <h2>Password Reset</h2>
-          <p>You requested a password reset. Click the link below to reset your password:</p>
-          <p><a href="${resetUrl}">${resetUrl}</a></p>
-          <p>This link expires in 1 hour.</p>
-          <p>If you didn't request this, ignore this email.</p>
-        `
-      });
+    if (transporter) {
+      try {
+        await transporter.sendMail({
+          from: process.env.SMTP_FROM || process.env.SMTP_USER,
+          to: email,
+          subject: 'Password Reset Request',
+          html: `
+            <h2>Password Reset</h2>
+            <p>You requested a password reset. Click the link below to reset your password:</p>
+            <p><a href="${resetUrl}">${resetUrl}</a></p>
+            <p>This link expires in 1 hour.</p>
+            <p>If you didn't request this, ignore this email.</p>
+          `
+        });
+        console.log(`✅ Password reset email sent to ${email}`);
+      } catch (emailErr) {
+        console.error(`❌ Failed to send email to ${email}:`, emailErr.message);
+        // Still return success to user but log the actual reset URL
+        console.log(`🔑 Password reset link for ${email}: ${resetUrl}`);
+      }
     } else {
       // If no email configured, log the reset URL (for development)
       console.log(`🔑 Password reset link for ${email}: ${resetUrl}`);
